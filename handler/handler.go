@@ -1,10 +1,15 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
+	"go-cloud/meta"
+	"go-cloud/util"
 	"io"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"time"
 )
 
 func UploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -18,6 +23,50 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = io.WriteString(w, string(data))
 	} else if r.Method == "POST" {
+		file, head, err := r.FormFile("file")
+		if err != nil {
+			fmt.Printf("Failed to get data,err:%s\n", err.Error())
+			return
+		}
+		defer file.Close()
 
+		fileMeta := meta.FileMeta{
+			FileName: head.Filename,
+			Location: "/Users/cyf/Pictures/" + head.Filename,
+			UploadAt: time.Now().Format("2006-01-02 15:04:05"),
+		}
+
+		newFile, err := os.Create(fileMeta.Location)
+		if err != nil {
+			fmt.Println("failed to create file,err:", err)
+		}
+		defer newFile.Close()
+		fileMeta.FileSize, err = io.Copy(newFile, file)
+		if err != nil {
+			fmt.Printf("io copy err:", err)
+			return
+		}
+		newFile.Seek(0, 0)
+		fileMeta.FileSha1 = util.FileSha1(newFile)
+		fmt.Println("sha1", fileMeta.FileSha1)
+		meta.UpdataFileMeta(fileMeta)
+
+		http.Redirect(w, r, "/file/upload/suc", http.StatusFound)
 	}
+}
+
+func UploadSucHandler(w http.ResponseWriter, r *http.Request) {
+	_, _ = io.WriteString(w, "Upload finished")
+}
+
+func GetFIleMetaHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	filehash := r.Form["filehash"][0]
+	fMate := meta.GetFileMeta(filehash)
+	data, err := json.Marshal(fMate)
+	if err != nil {
+		fmt.Println("json marshal err:", err)
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	w.Write(data)
 }
