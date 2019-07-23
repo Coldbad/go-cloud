@@ -1,5 +1,7 @@
 package meta
 
+import "sort"
+
 type FileMeta struct {
 	FileSha1 string
 	FileName string
@@ -21,4 +23,13 @@ func UpdataFileMeta(fmeta FileMeta) {
 
 func GetFileMeta(fileSha1 string) FileMeta {
 	return fileMetas[fileSha1]
+}
+
+func GetLastFileMetas(count int) []FileMeta {
+	fMetaArray := make([]FileMeta, len(fileMetas))
+	for _, v := range fileMetas {
+		fMetaArray = append(fMetaArray, v)
+	}
+	sort.Sort(ByUploadTime(fMetaArray))
+	return fMetaArray[0:count]
 }
