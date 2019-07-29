@@ -50,7 +50,7 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 		newFile.Seek(0, 0)
 		fileMeta.FileSha1 = util.FileSha1(newFile)
 		fmt.Println("sha1", fileMeta.FileSha1)
-		meta.UpdataFileMeta(fileMeta)
+		_ = meta.UpdataFileMetaDB(fileMeta)
 
 		http.Redirect(w, r, "/file/upload/suc", http.StatusFound)
 	}
@@ -63,7 +63,7 @@ func UploadSucHandler(w http.ResponseWriter, r *http.Request) {
 func GetFIleMetaHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	filehash := r.Form["filehash"][0]
-	fMate := meta.GetFileMeta(filehash)
+	fMate := meta.GetFileMetaDB(filehash)
 	data, err := json.Marshal(fMate)
 	if err != nil {
 		fmt.Println("json marshal err:", err)
