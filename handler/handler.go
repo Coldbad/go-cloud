@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"go-cloud/db"
 	"go-cloud/meta"
 	"go-cloud/util"
 	"io"
@@ -47,12 +48,18 @@ func UploadHandler(w http.ResponseWriter, r *http.Request) {
 			fmt.Printf("io copy err:", err)
 			return
 		}
-		newFile.Seek(0, 0)
+		_, _ = newFile.Seek(0, 0)
 		fileMeta.FileSha1 = util.FileSha1(newFile)
 		fmt.Println("sha1", fileMeta.FileSha1)
 		_ = meta.UpdataFileMetaDB(fileMeta)
-
-		http.Redirect(w, r, "/file/upload/suc", http.StatusFound)
+		r.ParseForm()
+		username := r.Form.Get("username")
+		isok := db.OnUserFileUploadFinished(username, fileMeta.FileSha1, fileMeta.FileName, fileMeta.FileSize)
+		if isok {
+			http.Redirect(w, r, "/static/view/home.html", http.StatusFound)
+		} else {
+			w.Write([]byte("failed"))
+		}
 	}
 }
 
@@ -76,7 +83,9 @@ func GetFIleMetaHandler(w http.ResponseWriter, r *http.Request) {
 func FileQueryHandler(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	limitCnt, _ := strconv.Atoi(r.Form.Get("limit"))
-	fMate := meta.GetLastFileMetas(limitCnt)
+	username := r.Form.Get("username")
+
+	fMate, err := db.QueryUserFileMetas(username, limitCnt)
 	data, err := json.Marshal(fMate)
 	if err != nil {
 		fmt.Println("json marshal err:", err)
@@ -144,4 +153,42 @@ func FileMetaDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	os.Remove(fileMeta.Location)
 	meta.RemoveFileMeta(fileSha1)
 	w.WriteHeader(http.StatusOK)
+}
+
+func TryFastUploadHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	username := r.Form.Get("username")
+	filehash := r.Form.Get("filehash")
+	filename := r.Form.Get("filename")
+	filesize, _ := strconv.Atoi(r.Form.Get("filesize"))
+	fileMeta, err := db.GetFileMeta(filehash)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if fileMeta == nil {
+		resp := util.RespMsg{
+			Code: -1,
+			Msg:  "妙传失败",
+		}
+		w.Write(resp.JSONBytes())
+		return
+	}
+	suc := db.OnUserFileUploadFinished(username, filehash, filename, int64(filesize))
+	if suc {
+		resp := util.RespMsg{
+			Code: 0,
+			Msg:  "成功",
+		}
+		w.Write(resp.JSONBytes())
+		return
+	} else {
+		resp := util.RespMsg{
+			Code: -2,
+			Msg:  "失败",
+		}
+		w.Write(resp.JSONBytes())
+		return
+	}
 }
