@@ -2,12 +2,16 @@ package handler
 
 import (
 	"fmt"
-	"go-cloud/cache/redis"
+	"github.com/garyburd/redigo/redis"
+	rPool "go-cloud/cache/redis"
+	"go-cloud/db"
 	"go-cloud/util"
 	"math"
 	"net/http"
 	"os"
+	"path"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -28,7 +32,7 @@ func InitialMultipartUploadHandler(w http.ResponseWriter, r *http.Request) {
 		w.Write(util.NewRespMsg(-1, "params invalid", nil).JSONBytes())
 		return
 	}
-	rConn := redis.RedisPool().Get()
+	rConn := rPool.RedisPool().Get()
 	defer rConn.Close()
 
 	upInfo := MultipartUploadInfo{
@@ -51,9 +55,12 @@ func UploaadPartHandler(w http.ResponseWriter, r *http.Request) {
 	uploadID := r.Form.Get("uploadid")
 	chunkIndex := r.Form.Get("index")
 
-	rConn := redis.RedisPool().Get()
+	rConn := rPool.RedisPool().Get()
 	defer rConn.Close()
-	fd, err := os.Create("/Users/cyf/Pictures/data/" + uploadID + "/" + chunkIndex)
+
+	fpath := "/Users/cyf/Pictures/data/" + uploadID + "/" + chunkIndex
+	os.MkdirAll(path.Dir(fpath), 0744)
+	fd, err := os.Create(fpath)
 	if err != nil {
 		w.Write(util.NewRespMsg(-1, "Upload part failed", nil).JSONBytes())
 		return
@@ -71,4 +78,42 @@ func UploaadPartHandler(w http.ResponseWriter, r *http.Request) {
 	rConn.Do("HSET", "MP_"+uploadID, "chkidx_"+chunkIndex, 1)
 
 	w.Write(util.NewRespMsg(0, "OK", nil).JSONBytes())
+}
+
+func CompleteUploadHandler(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	upid := r.Form.Get("uploadid")
+	username := r.Form.Get("username")
+	filehash := r.Form.Get("filehash")
+	filesize := r.Form.Get("filesize")
+	filename := r.Form.Get("filename")
+	rConn := rPool.RedisPool().Get()
+	defer rConn.Close()
+	data, err := redis.Values(rConn.Do("HGETALL", "MP_"+upid))
+	if err != nil {
+		w.Write(util.NewRespMsg(-1, "err", nil).JSONBytes())
+		return
+	}
+	totalCount := 0
+	chunkCount := 0
+	for i := 0; i < len(data); i += 2 {
+		k := string(data[i].([]byte))
+		v := string(data[i+1].([]byte))
+		if k == "chunkcount" {
+			totalCount, _ = strconv.Atoi(v)
+		} else if strings.HasPrefix(k, "chkidx_") && v == "1" {
+			chunkCount++
+		}
+	}
+	if totalCount != chunkCount {
+		w.Write(util.NewRespMsg(-2, "err", nil).JSONBytes())
+		return
+	}
+
+	fsize, _ := strconv.Atoi(filesize)
+	db.OnFileUploadFinished(filehash, filename, int64(fsize), "")
+	db.OnUserFileUploadFinished(username, filehash, filename, int64(fsize))
+
+	w.Write(util.NewRespMsg(0, "OK", nil).JSONBytes())
+
 }
